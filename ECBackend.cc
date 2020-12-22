@@ -781,7 +781,7 @@ bool ECBackend::_handle_message(
 
     osd->osd->pending_sub_read_num--;
     osd->osd->get_logger()->set(l_osd_pending_sub_read_num,osd->osd->pending_sub_read_num);
-    dout(0)<<" mydebug:pending_info#"<<ceph_clock_now()<<","<<osd->osd->pending_sub_read_num<<"#"<<dendl;
+    dout(0)<<" mydebug:pending_info hekang #"<<ceph_clock_now()<<","<<osd->osd->pending_sub_read_num<<"#"<<dendl;
 
     const MOSDECSubOpRead *op = static_cast<const MOSDECSubOpRead*>(_op->get_req());
     MOSDECSubOpReadReply *reply = new MOSDECSubOpReadReply;
@@ -1700,7 +1700,7 @@ int ECBackend::get_min_avail_to_read_shards(
 	bool published = false;//记录是否进行过publish
 	int left_time = WS; //初始化剩余时间coordination_window_size
 	dout(0) << "finish initialize" << dendl;
-	dout(0) << "------coordination_window starts------" << dendl;
+  dout(0) << "------coordination_window starts------" << dendl;
   while (1) {
 			if (left_time == 0) {//如果一进来就是0的话，说明没有启动FSpinner
 				dout(0) << "FSpinner is disabled" << dendl;
@@ -1745,26 +1745,9 @@ int ECBackend::get_min_avail_to_read_shards(
 				break;
 			}
 	}
-	// dout(0) << "------coordination_window ends ------" << dendl;
-  // dout(0) << "...Peer List..." << dendl;
-	// for (auto i : Peer_List) {
-	// 	dout(0) << i.first << " [" ;
-	// 	for (auto j : i.second) {
-	// 		dout(0) << j << ",";
-	// 	}
-	// 	dout(0) << "]" << dendl;
-	// }
-	// num_coordinated += Peer_List.size() - 1;
-	// dout(0) << "..............." << dendl;
-	// dout(0) << "...Pub List..." << dendl;
-	// dout(0) << "[" << dendl;
-	// for (auto i : Pub_List) {
-	// 	dout(0) << i << "," <<dendl;
-	// }
-	// dout(0) << "]" << dendl;
-	// dout(0) << "..............." << dendl;
-
-	//scheduler
+	dout(0) << "------coordination_window ends ------" << dendl;
+  
+  //scheduler
 	dout(0) << "++++++ into scheduler ++++++" << dendl;
 	int sched_begin = 0, sched_end = 0;
 	sched_begin = ceph_clock_now();//调度开始的时间
@@ -1776,7 +1759,7 @@ int ECBackend::get_min_avail_to_read_shards(
 	sched_time = sched_end - sched_begin;
 	dout(0) << "++++++ out scheduler ++++++" << dendl;
 
-	//propagator
+  //propagator
 	dout(0) << "in propagator" << dendl; //如果有新的，就对Send_List中所有的进行发送
 	if (Peer_List.size() != 0) {
 		for (auto i : Send_List) {
@@ -1794,7 +1777,6 @@ int ECBackend::get_min_avail_to_read_shards(
 	//dout(0) << "average schedule = " << ((float)sched_time) / NUM_OBJ << dendl;
 	//dout(0) << "average propagate= " << ((float)propa_time) / NUM_OBJ << dendl;
   //??? 还差最后一步have
-
   //hekang
   
   /****k-optimal***/

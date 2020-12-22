@@ -382,6 +382,7 @@ public:
   char* IP;
   int PORT;
   vector<redisContext *>redis_contexts;
+  redisContext *redis_context;
   //for gio
   vector<int> queue_map;
   vector<string> last_time;

@@ -288,31 +288,34 @@ OSDService::OSDService(OSD *osd) :
   objecter->init();
     //hekang
 
-  // //connect redis
-  // redis_context = redisConnect(IP, PORT);
-  // if (redis_context->err) {    /* Error flags, 0 when there is no error */
-	// 	dout(0)<<": mydebug: connect redis fail! "<< dendl;
-	// }else{
-  //   dout(0)<<": mydebug: connect redis success! "<< dendl;
-  // }
-  vector<string> IPs = {"10.0.0.1",
-                        "10.0.0.2",
-                        "10.0.0.3",
-                        "10.0.0.4",
-                        "10.0.0.5",
-                        "10.0.0.6",
-                        "10.0.0.7",
-                        "10.0.0.8"
-                        };
-  for(int i = 0; i < NUM_OSD; i++){
-    redisContext *tempredis_context = redisConnect(IPs[i].c_str(), PORT);
-    if (tempredis_context->err) {    /* Error flags, 0 when there is no error */
-	 	  dout(0)<<": mydebug: connect redis fail! "<< dendl;
-	  }else{
-      dout(0)<<": mydebug: connect redis success! "<< dendl;
-    }
-    redis_contexts.push_back(tempredis_context);
+  //connect redis
+  redis_context = redisConnect(IP, PORT);
+  if (redis_context->err) {    /* Error flags, 0 when there is no error */
+		dout(0)<<": mydebug: connect redis fail! "<< dendl;
+	}else{
+    dout(0)<<": mydebug: connect redis success! "<< dendl;
   }
+  for(int i = 0; i < NUM_OSD; i++){
+    redis_contexts.push_back(redis_context);
+  }
+  // vector<string> IPs = {"10.0.0.9",
+  //                       "10.0.0.9",
+  //                       "10.0.0.9",
+  //                       "10.0.0.9",
+  //                       "10.0.0.9",
+  //                       "10.0.0.9",
+  //                       "10.0.0.9",
+  //                       "10.0.0.9"
+  //                       };
+  // for(int i = 0; i < NUM_OSD; i++){
+  //   redisContext *tempredis_context = redisConnect(IPs[i].c_str(), PORT);
+  //   if (tempredis_context->err) {    /* Error flags, 0 when there is no error */
+	//  	  dout(0)<<": mydebug: connect redis fail! "<< dendl;
+	//   }else{
+  //     dout(0)<<": mydebug: connect redis success! "<< dendl;
+  //   }
+  //   redis_contexts.push_back(tempredis_context);
+  // }
   //hekang
   for(int i=0;i<NUM_OSD;i++){
         queue_map.push_back(0);
