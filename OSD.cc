@@ -316,6 +316,18 @@ OSDService::OSDService(OSD *osd) :
     }
     redis_contexts.push_back(tempredis_context);
   }
+  redisReply* reply;
+  for(int i = 0; i < NUM_OSD; i++){
+    reply = (redisReply*)redisCommand(redis_contexts[i], "flushall");
+    if(reply->integer == 0)
+      dout(0)<<":node-"<<i <<" redis has been cleaned success" << dendl;
+    else
+    {
+      dout(0)<<":node-"<<i <<" redis has been cleaned fail, reply->integer = "<< reply->integer << dendl;
+    }
+    
+  }
+  
   //hekang
   for(int i=0;i<NUM_OSD;i++){
         queue_map.push_back(0);

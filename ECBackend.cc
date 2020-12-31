@@ -1691,6 +1691,7 @@ int ECBackend::get_min_avail_to_read_shards(
   }
   //先将自己加入Peer_List
   int my_id = get_parent()->whoami();
+  dout(0) << "hk_debug: osdid=" << my_id << dendl;
   for(auto i: have){
     Peer_List[my_id].push_back(i);
   }
@@ -1699,9 +1700,11 @@ int ECBackend::get_min_avail_to_read_shards(
 	vector<int> Pub_List;//用来记录自己发往了哪几个
 	bool published = false;//记录是否进行过publish
 	int left_time = WS; //初始化剩余时间coordination_window_size
-	dout(0) << "finish initialize" << dendl;
-  dout(0) << "------coordination_window starts------" << dendl;
-  while (1) {
+	dout(0) << "hk_debug:finish initialize" << dendl;
+  //reply = (redisReply*)redisCommand(contexts[my_id], "flushall");
+  
+  dout(0) << "hk_debug:------coordination_window starts------" << dendl;
+  while(1) {
 			if (left_time == 0) {//如果一进来就是0的话，说明没有启动FSpinner
 				dout(0) << "FSpinner is disabled" << dendl;
 				break;
@@ -1709,28 +1712,33 @@ int ECBackend::get_min_avail_to_read_shards(
 			//publish:对其他的redisserver上的comm_queue做rpush操作
 			if (published == false) {//还没publish过
 				int pub_begin = 0, pub_end = 0;//publish的开始和结束时间 
-				pub_begin = ceph_clock_now();
+				pub_begin = gettime();
+        
 				//每个object request 将自己的layout公开出去
 				string Win_Info = to_string(my_id) + " " + Layout + " " + to_string(pub_begin);
 				dout(0) << "Win_Info=" << Win_Info << dendl;
 				publish(my_id, reply, contexts, Pub_List, Win_Info);
+        
 				published = true;//只publish一次
-				pub_end = ceph_clock_now();
+				pub_end = gettime();
 				left_time -= pub_end - pub_begin;
+        dout(0) << "pub_begin = " << pub_begin <<  "pub_end = " << pub_end << dendl;
 				dout(0) << "publish finish, left time=" << left_time << "(usec)" << dendl;
 				if (left_time <= 0) {
 					dout(0) << "coordination window ends after publish" << dendl;//publish已经用掉了所有时间
-					reply = (redisReply*)redisCommand(contexts[my_id], "del %s", "comm_queue");//删除comm_queue，不再接受新的pub
+					//reply = (redisReply*)redisCommand(contexts[my_id], "del %s", "comm_queue");//删除comm_queue，不再接受新的pub
 					break;
 				}
 			}
-
+      // reply = (redisReply*)redisCommand(contexts[my_id], "rpushx %s %s", "comm_queue", "2 1,0,2,4,5,6");
+      // dout(0) << "rpush: reply->str=" << " " << "reply->interger=" << reply->integer << dendl;
 			//subscribe:对自己的redisserver上的comm_queue做lpop操作
 			//每次lpop一个，如果到时间了，就把剩下的都搞完
 			int sub_begin = 0, sub_end = 0;// subscribe阶段的开始和结束
-			sub_begin = ceph_clock_now();
+			sub_begin = gettime();
 			sub_once(my_id, reply, contexts, "comm_queue", Peer_List, Send_List);
-			sub_end = ceph_clock_now();
+      sub_end = gettime();
+      dout(0) << "sub_begin = " << sub_begin <<  "sub_end = " << sub_end << dendl;
 			left_time -= sub_end - sub_begin;
 			if (left_time <= 0) {
 				dout(0) << "coordination window ends after subscribe" << dendl;//subscribe已经用掉了所有时间
@@ -1745,35 +1753,35 @@ int ECBackend::get_min_avail_to_read_shards(
 				break;
 			}
 	}
-	dout(0) << "------coordination_window ends ------" << dendl;
+	dout(0) << "hk_debug:------coordination_window ends ------" << dendl;
   
-  //scheduler
-	dout(0) << "++++++ into scheduler ++++++" << dendl;
-	int sched_begin = 0, sched_end = 0;
-	sched_begin = ceph_clock_now();//调度开始的时间
-	string propagate_string;
-	//先试一下不同步，直接取得resmap
-	scheduler(my_id, reply, contexts, propagate_string, Peer_List, Res_List, Load_List);
-	//至此完成了propagate string
-	sched_end = ceph_clock_now();//调度结束的时间
-	sched_time = sched_end - sched_begin;
-	dout(0) << "++++++ out scheduler ++++++" << dendl;
+  // //scheduler
+	// dout(0) << "++++++ into scheduler ++++++" << dendl;
+	// int sched_begin = 0, sched_end = 0;
+	// sched_begin = gettime();//调度开始的时间
+	// string propagate_string;
+	// //先试一下不同步，直接取得resmap
+	// scheduler(my_id, reply, contexts, propagate_string, Peer_List, Res_List, Load_List);
+	// //至此完成了propagate string
+	// sched_end = gettime();//调度结束的时间
+	// sched_time = sched_end - sched_begin;
+	// dout(0) << "++++++ out scheduler ++++++" << dendl;
 
-  //propagator
-	dout(0) << "in propagator" << dendl; //如果有新的，就对Send_List中所有的进行发送
-	if (Peer_List.size() != 0) {
-		for (auto i : Send_List) {
-			reply = (redisReply*)redisCommand(contexts[i], "rpushx %s %s", "res_queue", propagate_string.c_str());
-			dout(0) << "sent to " << i << ", res=" << reply->integer << " " << propagate_string << dendl;
-		}
-	}
-	propa_time = ceph_clock_now() - sched_end;//发送所花费时间    
-	freeReplyObject(reply);//释放reply
-	for (int i = 1; i <= NUM_OSD; i++) {//最后释放掉所有的context
-		redisFree(contexts[i]);
-	}
+  // //propagator
+	// dout(0) << "in propagator" << dendl; //如果有新的，就对Send_List中所有的进行发送
+	// if (Peer_List.size() != 0) {
+	// 	for (auto i : Send_List) {
+	// 		reply = (redisReply*)redisCommand(contexts[i], "rpushx %s %s", "res_queue", propagate_string.c_str());
+	// 		dout(0) << "sent to " << i << ", res=" << reply->integer << " " << propagate_string << dendl;
+	// 	}
+	// }
+	// propa_time = gettime() - sched_end;//发送所花费时间    
+	// freeReplyObject(reply);//释放reply
+	// for (int i = 1; i <= NUM_OSD; i++) {//最后释放掉所有的context
+	// 	redisFree(contexts[i]);
+	// }
 
-	dout(0) << "num_coordinated = " << num_coordinated * 2 << dendl;
+	// dout(0) << "num_coordinated = " << num_coordinated * 2 << dendl;
 	//dout(0) << "average schedule = " << ((float)sched_time) / NUM_OBJ << dendl;
 	//dout(0) << "average propagate= " << ((float)propa_time) / NUM_OBJ << dendl;
   //??? 还差最后一步have
@@ -1818,6 +1826,13 @@ int ECBackend::get_min_avail_to_read_shards(
 }
 
 //hekang
+//计算当前时间
+int ECBackend::gettime() {
+	struct timeval tv;
+	struct timezone tz;
+	gettimeofday(&tv, &tz);//tv和tz作为版本号
+	return tv.tv_sec * 1000000 + tv.tv_usec;
+}
 void ECBackend::havetostr(string& res, vector<int>& have)
 {
 	int size = have.size();
@@ -1899,17 +1914,25 @@ void ECBackend::publish(int my_id,
 	vector<int>& Pub_List,
 	string Win_Info) {
 	//将自己的comm_queue公开,用rpush，创建队列
-	reply = (redisReply*)redisCommand(contexts[my_id], "rpush %s %s", "comm_queue", "comm_head");
-	dout(0) << "create comm_queue, num=:" << reply->integer << dendl;
+  reply = (redisReply*)redisCommand(contexts[my_id], "llen %s", "comm_queue");
+  if(reply->integer == 0){//避免重复创建
+    reply = (redisReply*)redisCommand(contexts[my_id], "rpush %s %s", "comm_queue", "comm_head");
+	  dout(0) << "create comm_queue, num=:" << reply->integer << dendl;
+  }
+	  
 	//将自己的res_queue公开,用rpush，创建队列
-	reply = (redisReply*)redisCommand(contexts[my_id], "rpush %s %s", "res_queue", "res_head");
-	dout(0) << "create res_queue, num=:" << reply->integer << dendl;
-	for (int i = 1; i <= NUM_OSD; i++) {//开始publish
+  reply = (redisReply*)redisCommand(contexts[my_id], "llen %s", "res_queue");
+  if(reply->integer == 0){//避免重复创建
+    reply = (redisReply*)redisCommand(contexts[my_id], "rpush %s %s", "res_queue", "res_head");
+	  dout(0) << "create res_queue, num=:" << reply->integer << dendl;
+  }
+	
+	for (int i = 0; i < NUM_OSD; i++) {//开始publish
 		if (i == my_id)
 			continue;//跳过自己
 		//用rpushx，对已存在的队列进行插入
 		reply = (redisReply*)redisCommand(contexts[i], "rpushx %s %s", "comm_queue", Win_Info.c_str());
-		dout(0) << "push to " << to_string(i) << ", res=" << reply->integer << dendl;
+		dout(0) << "timenow:" << gettime() << "push to " << to_string(i) << ", num=" << reply->integer << dendl;
 		if (reply->integer > 0) {
 			Pub_List.push_back(i);//将pub成功的值加入Pub_List
 		}
@@ -1928,14 +1951,17 @@ bool ECBackend::sub_once(int my_id,
 {
 	//为了防止head被pop出来，只有在队列大小大于等于2的时候才rpop
 	reply = (redisReply*)redisCommand(contexts[my_id], "llen %s", queuename.c_str());
+  dout(0) << "llen: reply->str=" << " " << "reply->interger=" << reply->integer << dendl;
 	if (reply->integer >= 2) {
 		dout(0) << "able to rpop" << dendl;
 		reply = (redisReply*)redisCommand(contexts[my_id], "rpop %s", queuename.c_str());
+    dout(0) << "rpop: reply->str=" << reply->str << "reply->interger=" << reply->integer << dendl;
 		if (reply->str != NULL) {
 			dout(0) << "sub from, res=" << reply->str << dendl;//添加进Peer_List
 			int id = 0;
 			vector<int> temp_have;
       string tempstring = reply->str;
+      dout(0) << "reply->str = " << reply->str << dendl;
 			id = stoi(getstring(tempstring));
 			string havestring = getstring(tempstring);
 			strtohave(havestring,temp_have);

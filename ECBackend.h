@@ -691,6 +691,7 @@ public:
   void _failed_push(const hobject_t &hoid,
     pair<RecoveryMessages *, ECBackend::read_result_t &> &in);
   //hekang
+  int gettime();
   void havetostr(string& res, vector<int>& have);
   void strtohave(string& res, vector<int>& have);
   void update_Load_List(vector<int>& Load_List, string& Load_List_string);

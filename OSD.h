@@ -83,7 +83,7 @@ using namespace std;
 #define EC_K 4
 #define EC_M 2
 #define SIZE_POOL 8
-#define WS 10000
+#define WS 2000
 #define CEPH_OSD_PROTOCOL    10 /* cluster internal */
 
 
