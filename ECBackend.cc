@@ -1683,26 +1683,38 @@ int ECBackend::get_min_avail_to_read_shards(
   //communicator:先publish，再监听，在coordination_window之内
  
   map<int, vector<int>> Peer_List;//这个地方要考虑一下，要使得map是先进先出的
-	vector<int> Send_List;//和PeerList差不多，记录发往哪几个
+	set<int> Send_List;//和PeerList差不多，记录发往哪几个
 	map<int, vector<int>> Res_List; //{1, {1,2,3,4}}
   vector<int> Load_List;
   for(int i = 0; i < NUM_OSD; i++){
     Load_List.push_back(0);
   }
   //先将自己加入Peer_List
+  string stringout = "";
   int my_id = get_parent()->whoami();
   dout(0) << "hk_debug: osdid=" << my_id << dendl;
   for(auto i: have){
     Peer_List[my_id].push_back(i);
+    stringout += to_string(i) + ",";
   }
+  dout(0) << "have.size = " << have.size() <<"have 为 " << stringout.c_str() << dendl;
   string Layout;//layout
 	havetostr(Layout, Peer_List[my_id]);
 	vector<int> Pub_List;//用来记录自己发往了哪几个
 	bool published = false;//记录是否进行过publish
 	int left_time = WS; //初始化剩余时间coordination_window_size
+
 	dout(0) << "hk_debug:finish initialize" << dendl;
   //reply = (redisReply*)redisCommand(contexts[my_id], "flushall");
-  
+  //清空redis上的内容
+  reply = (redisReply*)redisCommand(contexts[my_id], "flushall");
+  if(reply->integer == 0)
+    dout(0) <<" redis has been cleaned success" << dendl;
+  else
+  {
+    dout(0) <<" redis has been cleaned fail, reply->integer = "<< reply->integer << dendl;
+  }
+
   dout(0) << "hk_debug:------coordination_window starts------" << dendl;
   while(1) {
 			if (left_time == 0) {//如果一进来就是0的话，说明没有启动FSpinner
@@ -1755,28 +1767,30 @@ int ECBackend::get_min_avail_to_read_shards(
 	}
 	dout(0) << "hk_debug:------coordination_window ends ------" << dendl;
   
-  // //scheduler
-	// dout(0) << "++++++ into scheduler ++++++" << dendl;
-	// int sched_begin = 0, sched_end = 0;
-	// sched_begin = gettime();//调度开始的时间
-	// string propagate_string;
-	// //先试一下不同步，直接取得resmap
-	// scheduler(my_id, reply, contexts, propagate_string, Peer_List, Res_List, Load_List);
-	// //至此完成了propagate string
-	// sched_end = gettime();//调度结束的时间
-	// sched_time = sched_end - sched_begin;
-	// dout(0) << "++++++ out scheduler ++++++" << dendl;
+  //scheduler
+	dout(0) << "++++++ into scheduler ++++++" << dendl;
+  set<int> have_res;
+	int sched_begin = 0, sched_end = 0;
+	sched_begin = gettime();//调度开始的时间
+	string propagate_string;
+	//先试一下不同步，直接取得resmap
+	scheduler(my_id, reply, contexts, propagate_string, Peer_List, Res_List, Load_List,have_res);
+	//至此完成了propagate string
+	sched_end = gettime();//调度结束的时间
+	sched_time = sched_end - sched_begin;
+	dout(0) << "++++++ out scheduler ++++++" << dendl;
 
-  // //propagator
-	// dout(0) << "in propagator" << dendl; //如果有新的，就对Send_List中所有的进行发送
-	// if (Peer_List.size() != 0) {
-	// 	for (auto i : Send_List) {
-	// 		reply = (redisReply*)redisCommand(contexts[i], "rpushx %s %s", "res_queue", propagate_string.c_str());
-	// 		dout(0) << "sent to " << i << ", res=" << reply->integer << " " << propagate_string << dendl;
-	// 	}
-	// }
-	// propa_time = gettime() - sched_end;//发送所花费时间    
-	// freeReplyObject(reply);//释放reply
+  //propagator
+	dout(0) << "in propagator" << dendl; //如果有新的，就对Send_List中所有的进行发送
+	if (Peer_List.size() != 0) {
+		for (auto i : Send_List) {
+			reply = (redisReply*)redisCommand(contexts[i], "rpushx %s %s", "res_queue", propagate_string.c_str());
+			dout(0) << "sent to " << i << ", res=" << reply->integer << " " << propagate_string << dendl;
+		}
+	}
+
+	propa_time = gettime() - sched_end;//发送所花费时间    
+	freeReplyObject(reply);//释放reply
 	// for (int i = 1; i <= NUM_OSD; i++) {//最后释放掉所有的context
 	// 	redisFree(contexts[i]);
 	// }
@@ -1791,9 +1805,32 @@ int ECBackend::get_min_avail_to_read_shards(
 
 
 
+  
+  stringout = "";
+  for(auto i : have_res){
+    stringout += to_string(i) + ",";
+  }
+  dout(0) << "have_res = " << stringout << dendl;
 
+  stringout = "";
+  for(auto i : have){
+    stringout += to_string(i) + ",";
+  }
+  dout(0) << "have = " << stringout << dendl;
+  //检查have_res是否出错
+  int er = 1;
+  for(auto it : have_res ){
+    if(have.find(it) == have.end()){
+      dout(0) << "use have" << dendl;
+      er = 0;
+    }
+  }
   set<int> need;
-  int r = ec_impl->minimum_to_decode(want, have, &need);
+  int r;
+  if(er)
+    r = ec_impl->minimum_to_decode(want, have_res, &need);
+  else 
+    r = ec_impl->minimum_to_decode(want, have, &need);
   if (r < 0)
     return r;
 
@@ -1854,11 +1891,15 @@ void ECBackend::strtohave(string& res, vector<int>& have)
 	int pos = res.find(",");
 	int pre_pos = 0;
 	int i = 0;
-	while (i < (EC_K + EC_M)) {
+	while (i < (EC_K+EC_M)) {
 		have.push_back(stoi(res.substr(pre_pos, (pos - pre_pos))));
 		i++;
 		pre_pos = pos + 1;
 		pos = res.find(",", pre_pos);
+		if (pos == -1) {
+			have.push_back(stoi(res.substr(pre_pos)));
+			break;
+		}
 	}
 }
 
@@ -1932,7 +1973,7 @@ void ECBackend::publish(int my_id,
 			continue;//跳过自己
 		//用rpushx，对已存在的队列进行插入
 		reply = (redisReply*)redisCommand(contexts[i], "rpushx %s %s", "comm_queue", Win_Info.c_str());
-		dout(0) << "timenow:" << gettime() << "push to " << to_string(i) << ", num=" << reply->integer << dendl;
+		dout(0) << "timenow:" << gettime() << "info:" << Win_Info << "push to " << to_string(i) << ", num=" << reply->integer << dendl;
 		if (reply->integer > 0) {
 			Pub_List.push_back(i);//将pub成功的值加入Pub_List
 		}
@@ -1947,7 +1988,7 @@ bool ECBackend::sub_once(int my_id,
 	vector<redisContext*>& contexts,
 	string queuename,
 	map<int, vector<int>>& Peer_List,
-	vector<int>& Send_List)
+	set<int>& Send_List)
 {
 	//为了防止head被pop出来，只有在队列大小大于等于2的时候才rpop
 	reply = (redisReply*)redisCommand(contexts[my_id], "llen %s", queuename.c_str());
@@ -1965,8 +2006,13 @@ bool ECBackend::sub_once(int my_id,
 			id = stoi(getstring(tempstring));
 			string havestring = getstring(tempstring);
 			strtohave(havestring,temp_have);
+      string stringout = "";
+      for(auto i: temp_have){
+        stringout += to_string(i) + ",";
+      }
+      dout(0) << "havestring = " << havestring.c_str() << "temphave = "<< stringout.c_str() << dendl;
 			Peer_List[id] = temp_have;
-			Send_List.push_back(id);
+			Send_List.insert(id);
 			return true;
 		}
 	}
@@ -1979,15 +2025,18 @@ void ECBackend::scheduler(int my_id,
 	string& propagate_string,
 	map<int, vector<int>>& Peer_List,
 	map<int, vector<int>>& Res_List,
-	vector<int> &Load_List)
+	vector<int> &Load_List,
+  set<int> &have_res)
 {
 	//先试一下不同步，直接取得resmap
 	reply = (redisReply*)redisCommand(contexts[my_id], "rename %s %s", "res_queue", "res_queue2");//更改comm_queue名称，使其他OSD无法访问
 	reply = (redisReply*)redisCommand(contexts[my_id], "llen %s", "res_queue2");
+  dout(0) << "res_queue2=" << reply->integer << dendl;
 	if (reply->integer == 1) {//说明里面只有一个head了，可以把comm_queue2删除
 		reply = (redisReply*)redisCommand(contexts[my_id], "del %s", "res_queue2");
 	}
 	else if (reply->integer > 1) {//说明里面还有新的
+    dout(0) << "进入到调度" << dendl;
 		int left_num = reply->integer - 1;
 		int res_id = 0, res_time = 0, oldest_time = INT_MAX;
 		vector<int> oldest_index;
@@ -1995,6 +2044,7 @@ void ECBackend::scheduler(int my_id,
 		for (int i = 0; i < left_num; i++)//先把里面的所有结果取出来
 		{
 			reply = (redisReply*)redisCommand(contexts[my_id], "rpop %s", "res_queue2");
+      dout(0) << "timenow:" << gettime() <<"i=" << i << " rpop: reply->str=" << reply->str << dendl;
 			if (reply->str != NULL) {
         string reply_string = reply->str;
 				res_strings.push_back(reply_string);
@@ -2012,6 +2062,7 @@ void ECBackend::scheduler(int my_id,
 				}
 			}
 		}
+    //
 		dout(0) << "get " << res_strings.size() << " results" << dendl;
 		reply = (redisReply*)redisCommand(contexts[my_id], "del %s", "res_queue2");//把comm_queue2删除
 		//标准格式为：ID+time.sec+time.usec+num_res+id_res+1,2,3,4+...+id_res+1,2,3,4+Load_List
@@ -2046,16 +2097,26 @@ void ECBackend::scheduler(int my_id,
 			update_Load_List(Load_List, Load_List_string);//更新load list
 			dout(0) << "-----finish update local list" << Load_List_string << dendl;
 		}
+    //
 	}
 	dout(0) << "------ got Res_List ------" << dendl;//到这一步就搞好Res_list和PeerList了，然后只需要对PeerList进行调度即可
 	//标准格式为：ID time id_res 1,2,3,4 ... id_res 1,2,3,4 Load_List
-	propagate_string = to_string(my_id) + " " + to_string(ceph_clock_now()) +  " " + to_string(Peer_List.size());
-	for (auto i : Peer_List) {//对于每个Peer
+	propagate_string = to_string(my_id) + " " + to_string(gettime()) +  " " + to_string(Peer_List.size());
+	string stringout = "";
+  for (auto i : Peer_List) {//对于每个Peer
 		vector<pair<int, int>> load_of_shard;
 		vector<int>& temp_layout = i.second;
-		for (int j = 0; j < (EC_K + EC_M); j++) {
+    //debug
+    stringout = "";
+    for(int j = 0; j < i.second.size(); j++){
+      stringout += to_string(i.second[j]) + ",";
+    }
+    dout(0) << "i = " << i << " i.second = " << stringout.c_str() << dendl;
+    //debug
+		for (int j = 0; j < (EC_K + EC_M) && j < temp_layout.size(); j++) {
 			load_of_shard.push_back(make_pair(temp_layout[j], Load_List[temp_layout[j]]));
-		}
+      dout(0) << "j = " << j << " temp_layout[j] = " << temp_layout[j] <<" Load_List[temp_layout[j]]="<< Load_List[temp_layout[j]]<< dendl;
+    }
 		sort(load_of_shard.begin(), load_of_shard.end(), mycmp);
 		propagate_string += " ";
 		propagate_string += to_string(i.first);
@@ -2063,12 +2124,26 @@ void ECBackend::scheduler(int my_id,
 		for (int j = 0; j < EC_K; j++) {//调度最小的k个
 			Load_List[load_of_shard[j].first]++; //更新Local_List
 			propagate_string += to_string(load_of_shard[j].first);
+      if(i.first == my_id){
+        have_res.insert(load_of_shard[j].first);
+      }
+      
 			if (j != (EC_K - 1)) {
 				propagate_string += ",";
 			}
 		}
-		dout(0) << "finish schedule" << i.first << dendl;
+		dout(0) << "finish schedule" << i.first << "propa = "<< propagate_string <<dendl;
 	}
+  //判断Res_list中是否有自己的调度结果,有的话就直接代替
+  if(Res_List.find(my_id) != Res_List.end()){
+    have_res.clear();
+    auto it = Res_List.find(my_id);
+    for(auto i : it->second){
+      have_res.insert(i);
+      stringout += to_string(i) + ",";
+    }
+    dout(0) << "have_res of Res_List = " << stringout << dendl;
+  }
 	//添加Local_List
 	propagate_string += " ";
 	for (int i = 0; i < SIZE_POOL; i++) {

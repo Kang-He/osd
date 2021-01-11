@@ -710,7 +710,7 @@ public:
 	  vector<redisContext*>& contexts,
 	  string queuename,
 	  map<int, vector<int>>& Peer_List,
-	  vector<int>& Send_List);
+	  set<int>& Send_List);
 
   //scheduler：根据收到的其他object request计算的调度结果作为输入进行调度
   void scheduler(int my_id,
@@ -719,7 +719,8 @@ public:
 	  string& propagate_string,
 	  map<int, vector<int>>& Peer_List,
 	  map<int, vector<int>>& Res_List,
-	  vector<int> &Load_List);
+	  vector<int> &Load_List,
+    set<int> &have_res);
 
   //hekang
 };
